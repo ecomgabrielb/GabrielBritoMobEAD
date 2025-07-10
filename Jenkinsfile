@@ -64,21 +64,52 @@ pipeline {
                 echo "==================== QUALITY GATE STAGE ===================="
                 script {
                     echo "⏳ Waiting for SonarQube Quality Gate..."
-                    try {
-                        timeout(time: 2, unit: 'MINUTES') {
-                            def qg = waitForQualityGate()
-                            echo "📊 Quality Gate Status: ${qg.status}"
-                            if (qg.status == 'ERROR') {
-                                echo "❌ Quality Gate failed: ${qg.status}"
-                                error "Pipeline aborted due to quality gate failure: ${qg.status}"
-                            } else {
-                                echo "✅ Quality Gate passed: ${qg.status}"
+                    
+                    def maxAttempts = 10  // 5 minutes total (10 attempts × 30 seconds)
+                    def attempt = 0
+                    def qgStatus = null
+                    
+                    timeout(time: 6, unit: 'MINUTES') {
+                        while (attempt < maxAttempts) {
+                            attempt++
+                            echo "🔍 Quality Gate check attempt ${attempt}/${maxAttempts}..."
+                            
+                            try {
+                                def qg = waitForQualityGate(abortPipeline: false)
+                                qgStatus = qg.status
+                                echo "📊 Quality Gate Status: ${qgStatus}"
+                                
+                                if (qgStatus == 'ERROR') {
+                                    echo "❌ Quality Gate failed with ERROR status"
+                                    error "Pipeline aborted due to quality gate failure: ${qgStatus}"
+                                } else if (qgStatus == 'PASSED') {
+                                    echo "✅ Quality Gate passed successfully!"
+                                    break
+                                } else {
+                                    echo "⏳ Quality Gate status: ${qgStatus} - waiting 30 seconds before next check..."
+                                    if (attempt < maxAttempts) {
+                                        sleep(30)
+                                    }
+                                }
+                            } catch (Exception e) {
+                                echo "⚠️  Quality Gate check failed on attempt ${attempt}: ${e.getMessage()}"
+                                if (attempt < maxAttempts) {
+                                    echo "⏳ Retrying in 30 seconds..."
+                                    sleep(30)
+                                } else {
+                                    echo "⚠️  All Quality Gate check attempts failed"
+                                    echo "⚠️  Continuing pipeline - check SonarQube dashboard manually"
+                                    echo "🔗 SonarQube Dashboard: http://host.docker.internal:9000/dashboard?id=GabrielMobEAD"
+                                }
                             }
                         }
-                    } catch (Exception e) {
-                        echo "⚠️  Quality Gate check timed out or failed: ${e.getMessage()}"
-                        echo "⚠️  Continuing pipeline - check SonarQube dashboard manually"
-                        echo "🔗 SonarQube Dashboard: http://host.docker.internal:9000/dashboard?id=GabrielMobEAD"
+                        
+                        if (qgStatus != 'PASSED' && qgStatus != 'ERROR') {
+                            echo "⚠️  Quality Gate check did not complete within ${maxAttempts} attempts"
+                            echo "📊 Final Status: ${qgStatus ?: 'UNKNOWN'}"
+                            echo "⚠️  Continuing pipeline - check SonarQube dashboard manually"
+                            echo "🔗 SonarQube Dashboard: http://host.docker.internal:9000/dashboard?id=GabrielMobEAD"
+                        }
                     }
                 }
             }
