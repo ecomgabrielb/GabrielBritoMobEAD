@@ -107,12 +107,29 @@ pipeline {
                         echo "🔍 Checking Docker availability..."
                         sh 'docker --version'
                         
-                        echo "🐳 Building Docker image..."
-                        dockerImage = docker.build registry + ":$BUILD_NUMBER"
-                        echo "✅ Docker image built successfully"
+                        echo "📋 Checking Dockerfile..."
+                        sh 'ls -la Dockerfile'
+                        sh 'cat Dockerfile'
+                        
+                        echo "🐳 Building Docker image using repository Dockerfile..."
+                        echo "🏗️  Build context: ${pwd()}"
+                        echo "📦 Registry: ${registry}"
+                        echo "🏷️  Tag: ${BUILD_NUMBER}"
+                        
+                        // Build image using the Dockerfile from the repository
+                        dockerImage = docker.build("${registry}:${BUILD_NUMBER}", ".")
+                        
+                        echo "✅ Docker image built successfully from repository Dockerfile"
+                        echo "🐳 Image: ${registry}:${BUILD_NUMBER}"
+                        
+                        // List built images for verification
+                        sh "docker images | grep ${registry} || echo 'No images found with registry name'"
+                        
                     } catch (Exception e) {
                         echo "❌ Docker build failed: ${e.getMessage()}"
                         echo "🔧 Docker may not be available in this Jenkins container"
+                        echo "📄 Dockerfile content:"
+                        sh 'cat Dockerfile || echo "Dockerfile not found"'
                         echo "💡 Solutions:"
                         echo "   1. Mount Docker socket: -v /var/run/docker.sock:/var/run/docker.sock"
                         echo "   2. Install Docker in Jenkins container"
@@ -162,16 +179,18 @@ pipeline {
                             fi
                         '''
                         
-                        // Pull latest image from DockerHub and deploy
+                        // Deploy using the freshly built image
                         sh """
-                            echo "📥 Pulling latest image from DockerHub..."
-                            docker pull ${registry}:${BUILD_NUMBER} || echo "⚠️  Pull failed, using local image"
+                            echo "🐳 Using freshly built image from repository Dockerfile..."
+                            echo "📦 Image: ${registry}:${BUILD_NUMBER}"
                             
                             echo "🚀 Starting new staging container..."
                             docker run -d \\
                                 --name mobead-staging \\
                                 -p 8081:80 \\
                                 --restart unless-stopped \\
+                                -e ENV=staging \\
+                                -e BUILD_NUMBER=${BUILD_NUMBER} \\
                                 ${registry}:${BUILD_NUMBER}
                             
                             echo "⏳ Waiting for container to start..."
@@ -275,10 +294,10 @@ pipeline {
                             fi
                         '''
                         
-                        // Pull latest image from DockerHub and deploy to production
+                        // Deploy using the freshly built image from repository
                         sh """
-                            echo "📥 Pulling latest production image from DockerHub..."
-                            docker pull ${registry}:latest || echo "⚠️  Pull failed, using local image"
+                            echo "🐳 Using freshly built production image from repository Dockerfile..."
+                            echo "📦 Image: ${registry}:${BUILD_NUMBER}"
                             
                             echo "🚀 Starting new production container..."
                             docker run -d \\
@@ -288,7 +307,8 @@ pipeline {
                                 -e ENV=production \\
                                 -e BUILD_NUMBER=${BUILD_NUMBER} \\
                                 -e DEPLOYED_BY="${env.APPROVER}" \\
-                                ${registry}:latest
+                                -e DEPLOYMENT_NOTE="${env.DEPLOYMENT_NOTE}" \\
+                                ${registry}:${BUILD_NUMBER}
                             
                             echo "⏳ Waiting for container to start..."
                             sleep 10
