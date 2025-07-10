@@ -137,7 +137,19 @@ pipeline {
                 script {
                     try {
                         echo "🚧 Deploying to staging environment..."
-                        echo "🐳 Using Docker image: ${registry}:${BUILD_NUMBER}"
+                        echo "🐳 Pulling image from DockerHub: ${registry}:${BUILD_NUMBER}"
+                        
+                        // First push the image to DockerHub if not already done
+                        try {
+                            docker.withRegistry('https://registry-1.docker.io/v2/', registryCredential) {
+                                dockerImage.push("${BUILD_NUMBER}")
+                                dockerImage.push("staging")
+                            }
+                            echo "📤 Image pushed to DockerHub for staging"
+                        } catch (Exception pushError) {
+                            echo "⚠️  DockerHub push failed: ${pushError.getMessage()}"
+                            echo "📦 Using local image for deployment..."
+                        }
                         
                         // Stop and remove existing staging container if it exists
                         sh '''
@@ -150,12 +162,16 @@ pipeline {
                             fi
                         '''
                         
-                        // Deploy new staging container
+                        // Pull latest image from DockerHub and deploy
                         sh """
+                            echo "📥 Pulling latest image from DockerHub..."
+                            docker pull ${registry}:${BUILD_NUMBER} || echo "⚠️  Pull failed, using local image"
+                            
                             echo "🚀 Starting new staging container..."
                             docker run -d \\
                                 --name mobead-staging \\
                                 -p 8081:80 \\
+                                --restart unless-stopped \\
                                 ${registry}:${BUILD_NUMBER}
                             
                             echo "⏳ Waiting for container to start..."
@@ -163,10 +179,15 @@ pipeline {
                             
                             echo "🔍 Checking container status..."
                             docker ps | grep mobead-staging
+                            
+                            echo "🩺 Health check..."
+                            curl -f http://localhost:8081 || echo "⚠️  Health check failed - container may still be starting"
                         """
                         
                         echo "✅ Staging deployment completed successfully"
                         echo "🌐 Staging URL: http://localhost:8081"
+                        echo "🐳 Container: mobead-staging"
+                        echo "📦 Image: ${registry}:${BUILD_NUMBER}"
                         
                     } catch (Exception e) {
                         echo "❌ Staging deployment failed: ${e.getMessage()}"
@@ -227,14 +248,17 @@ pipeline {
                         echo "🚀 Starting production deployment..."
                         echo "👤 Approved by: ${env.APPROVER}"
                         echo "📝 Note: ${env.DEPLOYMENT_NOTE}"
+                        echo "🚨 Emergency: ${env.EMERGENCY_DEPLOYMENT}"
                         
-                        // Push to DockerHub registry
+                        // Push to DockerHub registry with production tags
                         try {
                             docker.withRegistry('https://registry-1.docker.io/v2/', registryCredential) {
-                                dockerImage.push("$BUILD_NUMBER")
+                                dockerImage.push("${BUILD_NUMBER}")
                                 dockerImage.push("latest")
+                                dockerImage.push("production")
+                                dockerImage.push("prod-${BUILD_NUMBER}")
                             }
-                            echo "📤 Image pushed to DockerHub successfully"
+                            echo "📤 Image pushed to DockerHub with production tags"
                         } catch (Exception pushError) {
                             echo "⚠️  DockerHub push failed: ${pushError.getMessage()}"
                             echo "📦 Continuing with local deployment..."
@@ -251,26 +275,47 @@ pipeline {
                             fi
                         '''
                         
-                        // Deploy new production container
+                        // Pull latest image from DockerHub and deploy to production
                         sh """
+                            echo "📥 Pulling latest production image from DockerHub..."
+                            docker pull ${registry}:latest || echo "⚠️  Pull failed, using local image"
+                            
                             echo "🚀 Starting new production container..."
                             docker run -d \\
                                 --name mobead-production \\
                                 -p 8080:80 \\
-                                ${registry}:${BUILD_NUMBER}
+                                --restart unless-stopped \\
+                                -e ENV=production \\
+                                -e BUILD_NUMBER=${BUILD_NUMBER} \\
+                                -e DEPLOYED_BY="${env.APPROVER}" \\
+                                ${registry}:latest
                             
                             echo "⏳ Waiting for container to start..."
-                            sleep 5
+                            sleep 10
                             
                             echo "🔍 Checking container status..."
                             docker ps | grep mobead-production
                             
-                            echo "🩺 Health check..."
-                            curl -f http://localhost:8080 || echo "⚠️  Health check failed - container may still be starting"
+                            echo "🩺 Production health check..."
+                            for i in {1..5}; do
+                                if curl -f http://localhost:8080; then
+                                    echo "✅ Production health check passed"
+                                    break
+                                else
+                                    echo "⏳ Health check attempt \$i/5 failed, retrying in 10s..."
+                                    sleep 10
+                                fi
+                            done
+                            
+                            echo "📊 Container logs (last 10 lines):"
+                            docker logs --tail 10 mobead-production || true
                         """
                         
                         echo "✅ Production deployment completed successfully"
                         echo "🌐 Production URL: http://localhost:8080"
+                        echo "🐳 Container: mobead-production"
+                        echo "📦 Image: ${registry}:latest"
+                        echo "🏷️  Tags: latest, production, prod-${BUILD_NUMBER}, ${BUILD_NUMBER}"
                         
                     } catch (Exception e) {
                         echo "❌ Production deployment failed: ${e.getMessage()}"
