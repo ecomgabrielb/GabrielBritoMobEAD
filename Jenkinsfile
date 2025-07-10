@@ -81,7 +81,7 @@ pipeline {
                                 if (qgStatus == 'ERROR') {
                                     echo "❌ Quality Gate failed with ERROR status"
                                     error "Pipeline aborted due to quality gate failure: ${qgStatus}"
-                                } else if (qgStatus == 'PASSED') {
+                                } else if (qgStatus == 'OK') {
                                     echo "✅ Quality Gate passed successfully!"
                                     break
                                 } else {
