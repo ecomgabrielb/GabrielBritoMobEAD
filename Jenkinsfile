@@ -49,7 +49,7 @@ pipeline {
                                   -Dsonar.sources=. \
                                   -Dsonar.host.url=http://host.docker.internal:9000 \
                                   -Dsonar.login=\$SONAR_TOKEN \
-                                  -Dsonar.inclusions=**/*.xml,**/*.config,**/*.yml,**/*.yaml \
+                                  -Dsonar.inclusions=**/*.xml,**/*.config,**/*.yml,**/*.yaml,**/Dockerfile,**/*.dockerfile \
                                   -Dsonar.exclusions=**/*.js,**/*.ts,**/*.html,**/*.css,**/*.less,**/node_modules/**,**/__MACOSX/**,**/.git/**
                             """
                         }
