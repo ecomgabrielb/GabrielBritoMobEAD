@@ -72,7 +72,7 @@ pipeline {
                         while (true) {
                             attempt++
                             echo "🔍 Quality Gate check attempt ${attempt}..."
-                            
+                            sleep(30)
                             try {
                                 def qg = waitForQualityGate(abortPipeline: false)
                                 qgStatus = qg.status
